@@ -1,0 +1,83 @@
+import streamlit as st
+import requests
+import time
+
+# --- Setup Configuration ---
+st.set_page_config(page_title="Roblox Tracker", page_icon="🎮", layout="centered")
+
+PROXY_URL_USERS = "https://roproxy.com"
+PROXY_URL_PRESENCE = "https://roproxy.com"
+
+STATUS_MAPPING = {
+    0: ("Offline 🔴", "color: #ff4d4d; font-size: 24px; font-weight: bold;"),
+    1: ("Online 🌐", "color: #33cc33; font-size: 24px; font-weight: bold;"),
+    2: ("In Game 🎮", "color: #3399ff; font-size: 24px; font-weight: bold;"),
+    3: ("In Studio 🛠️", "color: #ff9933; font-size: 24px; font-weight: bold;")
+}
+
+st.title("🎯 Roblox Real-Time Presence Monitor")
+st.write("Track any user's online status 24/7 directly through the cloud.")
+
+# --- Search Interface ---
+username_input = st.text_input("Enter Roblox Username:", value="ironcan08")
+
+if "target_id" not in st.session_state:
+    st.session_state.target_id = None
+    st.session_state.target_name = ""
+
+if st.button("Lock Target & Start Monitor"):
+    with st.spinner("Searching Roblox records..."):
+        try:
+            res = requests.get(PROXY_URL_USERS, params={"keyword": username_input, "limit": 10})
+            if res.status_code == 200:
+                data = res.json().get("data", [])
+                found = False
+                for record in data:
+                    if record.get("name").lower() == username_input.lower():
+                        st.session_state.target_id = record.get("id")
+                        st.session_state.target_name = record.get("name")
+                        st.success(f"Successfully locked onto {st.session_state.target_name}!")
+                        found = True
+                        break
+                if not found:
+                    st.error(f"User '{username_input}' not found.")
+            else:
+                st.error("Could not reach Roblox lookup servers.")
+        except Exception as e:
+            st.error(f"Connection glitch: {e}")
+
+# --- Active Tracker Display ---
+if st.session_state.target_id:
+    st.markdown("---")
+    st.subheader(f"Monitoring: {st.session_state.target_name}")
+    st.text(f"User ID: {st.session_state.target_id}")
+    
+    # Placeholder layout card for status updates
+    status_box = st.empty()
+    game_box = st.empty()
+    time_box = st.empty()
+    
+    # Continuous background UI tracking frame
+    try:
+        res = requests.post(PROXY_URL_PRESENCE, json={"userIds": [st.session_state.target_id]})
+        if res.status_code == 200:
+            presence_array = res.json().get("userPresences", [])
+            if presence_array:
+                user_data = presence_array
+                status_code = user_data.get("userPresenceType", 0)
+                status_text, style = STATUS_MAPPING.get(status_code, ("Unknown ❓", ""))
+                
+                status_box.markdown(f'<p style="{style}">{status_text.upper()}</p>', unsafe_allow_allowed_html=True)
+                time_box.caption(f"Last updated: {time.strftime('%H:%M:%S')}")
+                
+                if status_code == 2:
+                    game_name = user_data.get("lastLocation", "Unknown Experience")
+                    game_box.info(f"🕹️ Currently Playing: **{game_name}**")
+        else:
+            status_box.warning("Temporary connection loss with API proxy.")
+    except Exception:
+        status_box.error("Tracking stream interrupted.")
+        
+    # Trigger an automatic page refresh every 15 seconds to look for status shifts
+    time.sleep(15)
+    st.rerun()
